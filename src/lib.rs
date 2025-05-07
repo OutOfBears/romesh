@@ -17,10 +17,20 @@ pub type Tangent = [f32; 4];
 #[derive(Debug, Clone)]
 pub struct Bone {
     pub name: String,
-    pub parent_id: usize,
-    pub lod_parent_id: usize,
+    pub parent_id: Option<u16>,
+    pub lod_parent_id: Option<u16>,
     pub culling: f32,
     pub cframe: [f32; 12],
+}
+
+#[derive(Debug, Clone)]
+pub struct Subset {
+    pub faces_begin: u32,
+    pub faces_end: u32,
+    pub verts_begin: u32,
+    pub verts_size: u32,
+    pub num_bone_indices: u32,
+    pub bone_indices: Vec<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +45,7 @@ pub struct RobloxMesh {
     pub skin_indices: Vec<[u8; 4]>,
     pub skin_weights: Vec<[f32; 4]>,
     pub bones: Vec<Bone>,
+    pub subsets: Vec<Subset>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +89,7 @@ impl RobloxMesh {
             skin_indices: Vec::new(),
             skin_weights: Vec::new(),
             bones: Vec::new(),
+            subsets: Vec::new(),
         }
     }
 
@@ -318,6 +330,7 @@ impl RobloxMesh {
         let mut skin_weights = Vec::new();
 
         let mut bones = Vec::new();
+        let mut subsets = Vec::new();
 
         reader.seek(SeekFrom::Start(start + header.header_size as u64))?;
 
@@ -434,8 +447,16 @@ impl RobloxMesh {
 
                 bones.push(Bone {
                     name: bone_name,
-                    parent_id: parent_id as usize,
-                    lod_parent_id: lod_parent_id as usize,
+                    parent_id: if parent_id != 0xffff {
+                        Some(parent_id)
+                    } else {
+                        None
+                    },
+                    lod_parent_id: if lod_parent_id != 0xffff {
+                        Some(lod_parent_id)
+                    } else {
+                        None
+                    },
                     culling,
                     cframe,
                 });
@@ -447,20 +468,20 @@ impl RobloxMesh {
         }
 
         if header.subset_count > 0 {
-            let mut bone_indices = vec![0; 26];
-
             for _ in 0..header.subset_count {
-                reader.read_u32::<LittleEndian>()?;
-                reader.read_u32::<LittleEndian>()?;
+                let faces_begin = reader.read_u32::<LittleEndian>()?;
+                let faces_end = reader.read_u32::<LittleEndian>()?;
+
                 let verts_begin = reader.read_u32::<LittleEndian>()?;
                 let verts_size = reader.read_u32::<LittleEndian>()?;
-                reader.read_u32::<LittleEndian>()?;
+                let verts_end = verts_begin + verts_size;
+
+                let num_bone_indices = reader.read_u32::<LittleEndian>()?;
+                let mut bone_indices = vec![0 as u16; 26];
 
                 for i in 0..26 {
-                    bone_indices[i as usize] = reader.read_u16::<LittleEndian>()? as usize;
+                    bone_indices[i as usize] = reader.read_u16::<LittleEndian>()?;
                 }
-
-                let verts_end = verts_begin + verts_size;
 
                 for i in verts_begin..verts_end {
                     skin_indices[i as usize][0] =
@@ -475,6 +496,15 @@ impl RobloxMesh {
                     skin_indices[i as usize][3] =
                         bone_indices[skin_indices[i as usize][3] as usize] as u8;
                 }
+
+                subsets.push(Subset {
+                    faces_begin,
+                    faces_end,
+                    verts_begin,
+                    verts_size,
+                    num_bone_indices,
+                    bone_indices,
+                });
             }
         }
 
@@ -520,6 +550,7 @@ impl RobloxMesh {
             vertex_colors,
             skin_indices,
             skin_weights,
+            subsets,
             bones,
         })
     }
