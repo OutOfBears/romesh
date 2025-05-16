@@ -206,7 +206,6 @@ impl RobloxMesh {
         let file_begin = reader.position();
 
         let header = Self::read_header(&version, &mut reader)?;
-        println!("{:?}", header);
 
         let file_end = reader.position()
             + (header.vertex_size as u64 * header.vertex_count as u64)
